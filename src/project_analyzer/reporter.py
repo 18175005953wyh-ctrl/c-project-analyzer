@@ -75,6 +75,8 @@ def render_terminal(report):
         lines.append("WARNING: Partial results. See warnings below and in reports.")
     for warning in report["warnings"]:
         lines.append(f"  Warning: {safe_text(warning['path'])}: {warning['reason']}")
+    if "comparison" in report:
+        lines.extend(["", *render_comparison(report["comparison"])])
     return "\n".join(lines)
 
 
@@ -108,7 +110,42 @@ def render_markdown(report):
         lines.append("None.")
     lines.extend(["", "## Counting rules", ""])
     lines.extend(f"- {rule}" for rule in report["rules"])
+    if "comparison" in report:
+        lines.extend(["", *render_comparison(report["comparison"], markdown=True)])
     return "\n".join(lines) + "\n"
+
+
+def render_comparison(comparison, markdown=False):
+    """Both human-readable formats use the same deltas stored in JSON."""
+    escape = markdown_cell if markdown else safe_text
+    labels = ("Files", "Total lines", "Code lines", "Comment lines", "Blank lines", "TODO", "FIXME")
+    lines = ["## Comparison" if markdown else "===== Comparison =====",
+             "", "Baseline analyzed at: " + escape(comparison["baseline_analyzed_at"] or "unknown")]
+    for warning in comparison["warnings"]:
+        lines.append("Warning: " + escape(warning))
+    if markdown:
+        lines.extend(["", "| Metric | Before | After | Delta |", "| --- | ---: | ---: | ---: |"])
+    for label, (key, item) in zip(labels, comparison["summary_delta"].items()):
+        if markdown:
+            lines.append(f"| {key} | {item['before']} | {item['after']} | {item['delta']:+d} |")
+        else:
+            lines.append(f"{label}: {item['before']} -> {item['after']} ({item['delta']:+d})")
+    for key, title, marker in (("added_files", "Added files", "+"),
+                                ("removed_files", "Removed files", "-")):
+        lines.extend(["", ("### " if markdown else "") + title + ":"])
+        lines.extend(("- " if markdown else "  ") + marker + " " + escape(path)
+                     for path in comparison[key])
+        if not comparison[key]:
+            lines.append("None.")
+    lines.extend(["", ("### " if markdown else "") + "Changed files:"])
+    for item in comparison["changed_files"]:
+        changes = ", ".join(f"{key} {value['delta']:+d}" for key, value in item["metrics"].items()
+                            if value["delta"])
+        lines.append(("- " if markdown else "  * ") + escape(item["path"]) + ": " + changes)
+    if not comparison["changed_files"]:
+        lines.append("None.")
+    lines.extend(["", f"Unchanged files: {comparison['unchanged_file_count']}"])
+    return lines
 
 
 def write_reports(report, output):

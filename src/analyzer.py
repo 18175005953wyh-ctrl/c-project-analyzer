@@ -6,6 +6,7 @@ import sys
 
 from project_analyzer.reporter import build_report, render_terminal, write_reports
 from project_analyzer.scanner import scan_project, validate_target
+from project_analyzer.comparator import load_baseline, compare_reports
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,8 @@ def main(argv=None):
                         help="report directory (default: this analyzer project's output folder)")
     parser.add_argument("--top", type=positive_integer, default=3,
                         help="number of largest files to show (positive integer; default: 3)")
+    parser.add_argument("--compare", metavar="REPORT_JSON",
+                        help="compare current statistics with a saved JSON report")
     args = parser.parse_args(argv)
     try:
         if not args.target.strip() or not args.output.strip():
@@ -38,8 +41,12 @@ def main(argv=None):
             raise ValueError("Output directory must not equal or contain the target directory.")
         if output.exists() and not output.is_dir():
             raise ValueError("Output path must be a directory.")
+        # Read and validate before any report writes, including same-output comparisons.
+        baseline = load_baseline(args.compare) if args.compare is not None else None
         scan = scan_project(target, output)
         report = build_report(target, scan, args.top)
+        if baseline is not None:
+            report["comparison"] = compare_reports(baseline, report)
         write_reports(report, output)
         print(render_terminal(report))
         print("Reports written: report.json and report.md")
