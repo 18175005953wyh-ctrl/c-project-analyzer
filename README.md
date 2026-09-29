@@ -4,9 +4,9 @@
 
 ## 项目背景
 
-学习 C 语言之后，可以用 Python 编写一个小工具来观察项目由多少文件和多少行代码组成。本项目适合作为文件处理、状态机和自动化测试的入门练习，也可以配合本仓库的 CampusTreeManager 项目演示。统计结果用于了解项目结构，不表示代码质量或开发效率。
+学习 C 语言之后，可以用 Python 编写一个小工具来观察项目由多少文件和多少行代码组成。本项目适合作为文件处理、状态机和自动化测试的入门练习，也可以分析其他本地 C 项目。统计结果用于了解项目结构，不表示代码质量或开发效率。
 
-本工具位于当前仓库的 `c-project-analyzer/` 子目录，原来的 CampusTreeManager 项目仍保留在仓库根目录。下面的命令除特别说明外，均在 **`c-project-analyzer` 目录内**运行。
+本工具已独立为 `c-project-analyzer` 仓库。下面的命令均在包含 `src/` 和 `tests/` 的仓库根目录运行。
 
 ## 主要功能
 
@@ -27,6 +27,7 @@ c-project-analyzer/
 │   └── project_analyzer/
 │       ├── __init__.py
 │       ├── scanner.py          # 查找文件、排除目录、UTF-8 读取
+│       ├── comparator.py       # 校验基线、按路径和指标计算增量
 │       ├── counter.py          # 行分类和标记统计
 │       └── reporter.py         # 汇总、排行榜、三种输出形式
 ├── tests/
@@ -82,7 +83,7 @@ python3 src/analyzer.py tests/sample_project
 ## 参数与示例
 
 ```text
-python src/analyzer.py <目标目录> [--output 输出目录] [--top 数量]
+python src/analyzer.py <目标目录> [--output 输出目录] [--top 数量] [--compare 旧report.json]
 ```
 
 | 参数 | 含义 | 默认值 |
@@ -90,6 +91,7 @@ python src/analyzer.py <目标目录> [--output 输出目录] [--top 数量]
 | 目标目录 | 递归扫描的 C 项目目录，必填 | 无 |
 | `--output` | JSON 和 Markdown 输出目录，不存在会创建 | 工具自身目录下的 `output/` |
 | `--top` | 按总行数列出的文件数，必须为正整数 | 3 |
+| `--compare` | 旧 JSON 报告路径；启用统计对比 | 不对比 |
 | `--help` | 查看参数帮助 | 无 |
 
 ```sh
@@ -101,7 +103,7 @@ python src/analyzer.py ../src --output output/campus
 python src/analyzer.py --help
 ```
 
-`../src` 是本仓库原有的 CampusTreeManager 源码目录。路径含空格时请加引号，例如 `python src/analyzer.py "../My C Project"`。
+`../src` 只是目标路径示例，请替换为实际存在的 C 项目目录。路径含空格时请加引号，例如 `python src/analyzer.py "../My C Project"`。
 
 目标路径和显式传入的 `--output` 相对于终端工作目录解析；未指定 `--output` 时始终写入本工具的 `output/`，不会因为从其他目录启动而改变。输出目录不允许等于目标目录，也不能是目标目录的祖先；可以位于目标目录内，其内容会被扫描器跳过。
 
@@ -210,11 +212,11 @@ python -m unittest discover -s tests -v
 - 每次将一个文件读入内存，不适合极大的单个源文件；扫描期间没有文件系统快照或并发修改保护。
 - 目标只保留目录名称，同名的不同目录需要由用户区分；文件路径在报告中相对于扫描目标。
 - 不跟随符号链接。Windows junction 的显式识别依赖 Python 3.12+；使用 3.10/3.11 时建议避免扫描含 junction 的目录。
-- 没有图形界面、复杂度分析、函数识别或历史变化比较。
+- 没有图形界面、复杂度分析、函数识别或 Git 历史分析；报告对比只比较统计数字。
 
 ## 后续改进方向
 
-可以增加自定义排除规则、流式读取大文件、报告前后对比，以及更完整的 C 续行识别。在保留简单命令行入口的前提下，再考虑函数统计或图形化展示。
+可以增加自定义排除规则、流式读取大文件，以及更完整的 C 续行识别。在保留简单命令行入口的前提下，再考虑函数统计或图形化展示。
 
 ## 项目中练习到的能力
 
@@ -230,3 +232,98 @@ python -m unittest discover -s tests -v
 `screenshots/.gitkeep` 保留截图目录，目前没有截图。可以运行样例后保存终端截图，以及 Markdown 报告的预览截图，再补充到此文档。
 
 本子项目使用 [MIT License](LICENSE)。该许可证适用于本子目录中的 C Project Analyzer 文件，不改变仓库其他项目的许可状态。
+
+## 报告前后对比
+
+报告对比不读取旧代码：先将旧 JSON 完整读入内存并校验，再扫描当前目录，最后写新报告。
+
+```sh
+python src/analyzer.py tests/sample_project --output output/baseline
+python src/analyzer.py tests/sample_project --output output/current --compare output/baseline/report.json
+```
+
+未修改项目时，第二次结果全部为零增量。建议将基线和当前报告放在不同目录。
+即使显式使用同一个输出目录，也会先读取基线再替换文件；但旧报告不会自动备份。
+
+### 数据模型与规则
+
+- 汇总比较 `file_count`、`total_lines`、`code_lines`、`comment_lines`、`blank_lines`、`todo_count`、`fixme_count`。
+- 每项均含 `before`、`after`、`delta`，`delta = after - before`。正数显示 `+3`，负数显示 `-3`，零显示 `+0`。
+- 文件以报告内的相对路径精确匹配，区分大小写，按路径排序。任意一项六类文件计数发生变化，就归入 `changed_files`，并保存全部六项增量。
+- `added_files`、`removed_files`、`unchanged_files` 是路径列表；另有 `unchanged_file_count`。
+- 新 JSON 顶层增加 `comparison`，含 `baseline_analyzed_at`、`baseline_target`、`summary_delta`、上述四类文件及 `warnings`。未提供 `--compare` 时不增加此字段，原来的报告和终端格式保持不变。
+- 终端及 Markdown 展示全部七项汇总、新增/删除路径、变化指标、未变化文件数量和比较警告，数据均来自同一 comparison 对象。
+- 基线必须包含 `summary`、`files` 及完整计数；计数必须是非负整数，拒绝布尔值、浮点数、重复路径、重复 JSON 键和不一致的汇总。额外字段不参与比较。`target`、`analyzed_at` 可省略，显示为未知；存在时必须为字符串。
+- 基线文件不存在、不可读、非 UTF-8、JSON 损坏或结构错误时返回退出码 1，打印简短 `Error:`，不写入新报告。
+- 目标目录名称不同或基线未记录名称时发出提示，但允许比较。任一报告标注 `complete=false` 时提示读取失败可能影响文件分类。
+
+### 可复现实验
+
+以下命令适用于 PowerShell、Windows 命令提示符或常见 Unix shell，Python 需可用。
+先复制样例到新的演示目录，保留原有测试样例不变。这里使用 `output/comparison-demo/project`；如果此目录已存在，第一条命令会报错，请改用另一个新目录并同步替换后续路径。
+
+```sh
+python -c "import shutil; shutil.copytree('tests/sample_project', 'output/comparison-demo/project')"
+python src/analyzer.py output/comparison-demo/project --output output/comparison-baseline
+python -c "from pathlib import Path; r=Path('output/comparison-demo/project'); (r/'example.h').unlink(); p=r/'main.c'; p.write_text(p.read_text(encoding='utf-8').replace('TODO:', 'DONE:'), encoding='utf-8'); (r/'extra.c').write_text('// Extra sample\nint extra;\n', encoding='utf-8')"
+python src/analyzer.py output/comparison-demo/project --output output/comparison-current --compare output/comparison-baseline/report.json
+```
+
+本次实际执行同样的复制和修改步骤后，终端对比区如下（时间由每次运行生成）：
+
+```text
+===== Comparison =====
+
+Baseline analyzed at: 2026-09-29T06:28:45+00:00
+Files: 3 -> 3 (+0)
+Total lines: 25 -> 20 (-5)
+Code lines: 15 -> 12 (-3)
+Comment lines: 6 -> 6 (+0)
+Blank lines: 4 -> 2 (-2)
+TODO: 2 -> 1 (-1)
+FIXME: 1 -> 1 (+0)
+
+Added files:
+  + extra.c
+
+Removed files:
+  - example.h
+
+Changed files:
+  * main.c: todo_count -1
+
+Unchanged files: 1
+Reports written: report.json and report.md
+```
+
+新增和删除的文件数相抵，所以文件总数仍为 3。删除头文件减少 7 行，新增文件增加 2 行，因此总行数减少 5。
+`main.c` 只将 `TODO:` 改为 `DONE:`，总行数没有变化，但仍正确识别为统计变化文件。
+
+### 升级测试实测
+
+2026-09-29，Windows x64，Python 3.12.14，执行：
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+原始测试结尾：
+
+```text
+Ran 55 tests in 1.802s
+
+OK (skipped=1)
+```
+
+原有 29 项保持原状（28 通过、1 项因宿主不允许创建符号链接而跳过），新增 26 项全部通过。
+新增覆盖全部汇总增量、正负符号、四类文件、中文及空格路径、零文件报告、各类损坏基线、特殊路径 Markdown 转义、输入不被修改、同目录先读后写、无参数旧输出兼容、JSON/Markdown/终端一致性。
+
+### 限制与解读
+
+- 这是统计差异，不是逐行 diff；内容改变但六项计数不变时属于统计未变化。
+- 重命名按删除旧路径、新增新路径处理，不识别文件身份，不读取 Git。
+- 仅凭目录名称不能确认是否同一项目；同名不同目录不会被识别。
+- 空报告指合法的零值 summary 加空 files 数组；空文件或 `{}` 不是有效报告。
+- 只比较成功读取的文件，读取失败可能表现为删除；注意报告完整性警告。
+- JSON 结构验证不能证明报告来源或统计规则一致，需使用可信且采用相同计数规则的基线。
+- 旧报告整体读入内存，内存开销随报告大小增长。未在 Linux/macOS 主机执行验证。
